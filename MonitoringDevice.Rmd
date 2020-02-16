@@ -1,0 +1,102 @@
+---
+title: "Machine Learning Application For Evaluation of Fitness Exercises"
+author: "Musawwadah Mukhtar"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE,message=FALSE, cache=TRUE, cache.path = '.cache/', fig.path = 'fig/', fig.align = 'center', dpi = 100, autodep = TRUE)
+```
+
+Based on data from accelerometers on the belt, forearm, arm and dumbell of 6 participants, we aim to predict the manner in which they did the exercise. There are five different ways of exercise involving performing barbell lifts. Such study helps identifying proper fitness exercise and improving human health.
+
+This report presents the data processing, the machine learning model (multiclass model with Random Forest algorithm), and conclusion. The original study is cited in the reference section.
+
+## Data Processing
+```{r downloading,echo=FALSE,cache=TRUE}
+if(!file.exists("../data")){
+  dir.create("../data")
+  dataUrl1 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+  download.file(dataUrl1,destfile="../data/pml-training.csv",method="curl")
+  dataUrl2 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+  download.file(dataUrl2,destfile="../data/pml-testing.csv",method="curl")
+  dateDownloaded <- date()
+  dateDownloaded
+}
+```
+We load the data associated with the reference given below, `trainingRaw`. We also downloaded a small testing data set containing only 20 instances, `predTestRaw`. The downloading code is set false; `echo=FALSE`. Only the data loading is shown.
+```{r,cache=TRUE}
+trainingRaw <- read.csv("../data/pml-training.csv")
+predTestRaw <- read.csv("../data/pml-testing.csv")
+```
+
+`trainingRaw` contains 93 no-NA columns and 67 columns having mostly NA values (more than 97%). `predTestRaw` contains 100 all-NA columns and 60 no-NA columns that are subset of the 93 columns in `trainingRaw`. [The first 7 of these 60 columns are irrelevant](https://www.coursera.org/learn/practical-machine-learning/discussions/all/threads/Db8UuojFEeaqqQqH4Vl8gQ) for predicting the exercise. They represent the trial index, the details of the participants and the time of the data collection, which are unrelated to the way of the exercise. The exercise label is shown in the last column, the *classe* variable of 5-level factor corresponding of the 5 different ways mentioned in the introduction. 
+
+The data cleaning is summarized below.
+```{r,cache=TRUE}
+selectVar <- c(rep(FALSE,7),rep(TRUE,153)) # Excluding the 7 irrelevant columns
+# Index of relevant columns that also have no-NA value
+noNAcols <-  which(selectVar & (colSums(is.na(predTestRaw)) == 0)) 
+nL <- length(noNAcols) # The length of the relevant columns including the exercise
+tidyData <- trainingRaw[,noNAcols] # cleaned trainingRaw
+predTest <- predTestRaw[,noNAcols] # cleaned predTestRaw
+```
+
+Quick look into the mean of the 52 predictors is shown below:
+```{r,echo=FALSE}
+summary(apply(tidyData[,-nL],2,mean))
+```
+
+Large range of the standard deviation of the 52 predictors can be seen as follow:
+```{r,echo=FALSE}
+summary(apply(tidyData[,-nL],2,sd))
+```  
+For this, we will apply the *feature scaling* preprocessing.
+
+The data are weakly skew as shown below.
+```{r,echo=FALSE}
+summary(tidyData$classe)
+```
+Hence, the error rate is a relevant performance measure; error rate is one minus accuracy.
+
+## Multiclass model with Random Forest algorithm
+Perhaps, the simplest and effective solution is to use **the Random Forest algorithm taking into account all variables**. It is a very accurate algorithm despite its low speed and risk of overfitting. 
+
+The minimalist approach consists of **splitting the `tidyData` set into training (here, 70 %) and testing set**; we neglect in the first time the optional cross-validation test. The data splitting is shown as follows:
+```{r}
+library(caret); set.seed(1777) # required caret package
+inTrain <- createDataPartition(y=tidyData$classe, p=0.7, list=FALSE)
+training <- tidyData[inTrain,]
+testing <- tidyData[-inTrain,]
+dim(training); dim(testing)
+```
+
+**Application of the Random forest algorithm** with *feature scaling* preprocessing is shown below; it may take about 5-10 hours (it certainly depends on the computer). `modFit$finalModel` shows the trained model, the in-sample error, and the confusion matrix.
+```{r}
+library(randomForest); set.seed(1777)
+modFit <- train(classe~ .,data=training,preProcess=c("center","scale"),method="rf",prox=TRUE)
+modFit$finalModel
+```  
+
+**The out-of-sample error** obtained with the `testing` set and its corresponding confusion matrix are presented below.
+```{r}
+pred <- predict(modFit,testing); predFALSE <- pred != testing$classe
+table(pred,testing$classe) # The out-of-sample CONFUSION MATRIX
+sum(predFALSE)/nrow(testing) # The out-of-sample error
+```  
+The generalized (out-of-sample) error of $0.65$%  is slightly higher than the OOB error $0.63$% of the trained model (in-sample error).
+
+## Conclusion
+We successfully perform Random Forest algorithm to predict the manner of barbell lift exercices out of 5 different ways. We use the error rate as performance measure. The generalized error is proven below 1%.
+
+Separately, we use the trained model to **predict the 20 different test cases in `predTest`**.
+```{r}
+predTestQuiz <- predict(modFit,predTest)
+predTestQuiz
+```  
+The results match entirely the solution of the **Course Project Prediction Quiz** (B A B A A E D B A A B C B A E E A B B B).
+
+Overall this model is effective albeit long calculation time. Application of *feature scaling* preprocessing seems to reduce the time by half. To speed-up the computation, we have also attempted *Principal component analyses* without success.  Improvement on accuracy can be attained with additional cross-validation set. Error rate of $0.65$% already corresponds to less-than-half chance of at least one error in 100 random test cases. Any need for accuracy improvement will depend on the extent of the machine learning application. 
+
+## Reference 
+* Ugulino, W. et al, Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements. Proceedings of 21st Brazilian Symposium on Artificial Intelligence. Advances in Artificial Intelligence - SBIA 2012. In: Lecture Notes in Computer Science. , pp. 52-61. Curitiba, PR: Springer Berlin / Heidelberg, 2012. [Link](http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har)
